@@ -7,7 +7,10 @@ export async function POST(request) {
     if ((await actor()).role !== 'manager') return NextResponse.json({ error: 'Only Svetlana can link Telegram IDs.' }, { status: 403 });
     const { employeeId, telegramUserId } = await request.json();
     if (!/^\d+$/.test(String(telegramUserId))) return NextResponse.json({ error: 'Telegram user ID must be numeric.' }, { status: 400 });
-    const { error } = await db().from('employees').update({ telegram_user_id: String(telegramUserId) }).eq('id', employeeId);
+    const telegramId = String(telegramUserId);
+    const { error: clearError } = await db().from('employees').update({ telegram_user_id: null }).eq('telegram_user_id', telegramId);
+    if (clearError) throw clearError;
+    const { error } = await db().from('employees').update({ telegram_user_id: telegramId }).eq('id', employeeId);
     if (error) throw error;
     const token = process.env.TELEGRAM_BOT_TOKEN, secret = process.env.TELEGRAM_WEBHOOK_SECRET;
     if (!token || !secret) throw new Error('Telegram server configuration is incomplete.');
