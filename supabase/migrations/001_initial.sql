@@ -57,3 +57,7 @@ create index transactions_sync_idx on public.transactions(sheet_sync_status);
 alter table public.employees enable row level security;
 alter table public.transactions enable row level security;
 
+-- The Vercel server uses Supabase's secret/service role. It bypasses RLS but,
+-- on projects with restrictive default grants, still needs explicit table access.
+grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.employees, public.transactions to service_role;
