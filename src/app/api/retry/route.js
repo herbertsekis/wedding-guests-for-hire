@@ -1,0 +1,2 @@
+import { NextResponse } from 'next/server'; import { actor } from '../../../lib/session'; import { retryExternal } from '../../../lib/processing';
+export async function POST(request) { try { const {reference,target}=await request.json(); return NextResponse.json({record:await retryExternal({actor:await actor(),reference,target})}); } catch(e) { return NextResponse.json({error:e.message},{status:e.status||500}); } }

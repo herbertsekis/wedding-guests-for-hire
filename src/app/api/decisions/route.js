@@ -1,0 +1,2 @@
+import { NextResponse } from 'next/server'; import { actor } from '../../../lib/session'; import { decideTransaction } from '../../../lib/processing';
+export async function POST(request) { try { const {reference,decision}=await request.json(); return NextResponse.json({record:await decideTransaction({actor:await actor(),reference,decision})}); } catch(e) { return NextResponse.json({error:e.message},{status:e.status||500}); } }
