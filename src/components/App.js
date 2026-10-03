@@ -1,9 +1,85 @@
 'use client';
 import { useEffect, useState } from 'react';
-const fmt=n=>`€${(Number(n||0)/100).toFixed(2)}`;
-const api=async(path, body)=>{const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'content-type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw Error(j.error);return j;};
-function Field({label,...props}){return <label>{label}<input required {...props}/></label>};
-function SaleForm({reload}){const [m,setM]=useState('');async function submit(e){e.preventDefault();const form=e.currentTarget;const f=new FormData(form);try{await api('/api/transactions',{type:'sale',reference:f.get('reference'),customer:f.get('customer'),project:f.get('project'),description:f.get('description'),amount:f.get('amount'),proposedSplit:{richard:f.get('richard'),anastasia:f.get('anastasia'),jean_claude:f.get('jean')}});setM('Sale saved.');form.reset();reload();}catch(x){setM(x.message)}} return <form onSubmit={submit}><h3>Sales entry</h3><Field label="Reference" name="reference" placeholder="S01"/><Field label="Customer" name="customer"/><label>Project<select name="project"><option>A</option><option>B</option></select></label><Field label="Description" name="description"/><Field label="Amount EUR" name="amount" type="number" min="0.01" step="0.01"/><div className="split"><Field label="Richard %" name="richard" type="number" min="0" max="100"/><Field label="Anastasia %" name="anastasia" type="number" min="0" max="100"/><Field label="Jean-Claude %" name="jean" type="number" min="0" max="100"/></div><button>Submit sale</button><output>{m}</output></form>}
-function ExpenseForm({reload}){const [m,setM]=useState('');async function submit(e){e.preventDefault();const form=e.currentTarget;const f=new FormData(form);try{await api('/api/transactions',{type:'expense',reference:f.get('reference'),description:f.get('description'),category:f.get('category'),amount:f.get('amount'),proposedAllocation:f.get('allocation')});setM('Expense saved.');form.reset();reload();}catch(x){setM(x.message)}} return <form onSubmit={submit}><h3>Expense entry</h3><Field label="Reference" name="reference" placeholder="E01"/><Field label="Description" name="description"/><label>Category<select name="category"><option>Materials</option><option>Travel</option><option>Other</option></select></label><Field label="Amount EUR" name="amount" type="number" min="0.01" step="0.01"/><label>Proposed allocation<select name="allocation"><option value="A">A</option><option value="B">B</option><option value="company_overhead">Company overhead</option></select></label><button>Submit expense</button><output>{m}</output></form>}
-function Card({title,value}){return <div className="card"><span>{title}</span><strong>{value}</strong></div>}
-export default function App(){const [data,setData]=useState(null),[message,setMessage]=useState('');const reload=()=>api('/api/data').then(setData).catch(e=>setMessage(e.message));useEffect(reload,[]);if(!data)return <main>Loading finance system… {message}</main>;const {employees,transactions,dashboard:d}=data;async function role(id){try{await api('/api/demo-role',{employeeId:id});setMessage('Demonstration role selected.');}catch(e){setMessage(e.message)}} async function decide(t){const isSale=t.type==='sale';const answer=prompt(isSale?'Final split as Richard,Anastasia,Jean-Claude percentages:':'Final allocation: A, B, or company_overhead',isSale?`${t.proposed_split.richard},${t.proposed_split.anastasia},${t.proposed_split.jean_claude}`:t.proposed_allocation);if(answer===null)return;try{const decision=isSale?{split:Object.fromEntries(['richard','anastasia','jean_claude'].map((k,i)=>[k,answer.split(',')[i]?.trim()]))}:{allocation:answer};await api('/api/decisions',{reference:t.reference,decision});reload()}catch(e){setMessage(e.message)}} async function retry(t,target){try{await api('/api/retry',{reference:t.reference,target});reload()}catch(e){setMessage(e.message)}} async function link(e){e.preventDefault();const f=new FormData(e.currentTarget);try{await api('/api/telegram-link',{employeeId:f.get('employeeId'),telegramUserId:f.get('telegramUserId')});setMessage('Telegram ID linked.');reload()}catch(x){setMessage(x.message)}} return <main><header><p className="eyebrow">Friends Included Ltd</p><h1>Wedding Guests for Hire</h1><p>Finance system implemented by <b>Herberts Ēķis</b>. All friendships expire at checkout.</p></header><section className="role"><h2>Demonstration role</h2><p>Select an employee to exercise server-enforced fictional permissions.</p>{employees.map(e=><button key={e.id} onClick={()=>role(e.id)}>{e.name}</button>)}<output>{message}</output></section><section className="forms"><SaleForm reload={reload}/><ExpenseForm reload={reload}/></section><section><h2>Financial dashboard</h2><div className="cards">{['A','B'].map(p=><Card key={p} title={`Project ${p} result`} value={fmt(d[p].result)}/>)}<Card title="Company result" value={fmt(d.company.result)}/><Card title="Company overhead" value={fmt(d.company.overhead)}/><Card title="Awaiting allocation" value={fmt(d.company.awaiting)}/></div><table><thead><tr><th>Measure</th><th>A</th><th>B</th><th>Company</th></tr></thead><tbody>{[['Approved income','income'],['Commission expense','commissions'],['Allocated expenses','expenses'],['Result','result']].map(([l,k])=><tr key={k}><td>{l}</td><td>{fmt(d.A[k])}</td><td>{fmt(d.B[k])}</td><td>{fmt(d.company[k])}</td></tr>)}</tbody></table><p>Commission earned: Richard {fmt(d.earned.richard)}, Anastasia {fmt(d.earned.anastasia)}, Jean-Claude {fmt(d.earned.jean_claude)}.</p></section><section><h2>Records and manager controls</h2><table><thead><tr><th>Reference</th><th>Submitter</th><th>Details</th><th>Status</th><th>Sheets</th><th>Notification</th><th>Actions</th></tr></thead><tbody>{transactions.map(t=><tr key={t.id}><td>{t.reference}</td><td>{t.submitted.name}</td><td>{t.type==='sale'?`${t.customer}; ${t.project}; ${fmt(t.amount_cents)}`:`${t.description}; proposed ${t.proposed_allocation}; ${fmt(t.amount_cents)}`}</td><td>{t.status}</td><td>{t.sheet_sync_status}{t.sheet_sync_status!=='synced'&&<button onClick={()=>retry(t,'sheet')}>Retry Sheets sync</button>}</td><td>{t.notification_status}{['failed','no_recipient'].includes(t.notification_status)&&<button onClick={()=>retry(t,'notification')}>Retry notification</button>}</td><td>{(t.status==='pending_approval'||t.status==='awaiting_allocation')&&<button onClick={()=>decide(t)}>Approve / correct</button>}</td></tr>)}</tbody></table></section><section><h2>Manager setup</h2><form onSubmit={link}><label>Employee<select name="employeeId">{employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label><Field label="Telegram numeric user ID" name="telegramUserId"/><button>Link Telegram ID</button></form></section><footer><h2>Instructions and reviewer links</h2><p>Salespeople submit sales; Kevin submits expenses; Svetlana approves or corrects pending records. Website and Telegram use the same processing code. Start the bot before notifications.</p><a href={process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL||'#'}>Telegram bot</a> · <a href={process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL||'#'}>Google Sheets</a> · <a href={process.env.NEXT_PUBLIC_GITHUB_URL||'#'}>GitHub repository</a></footer></main>}
+
+const fmt = n => `€${(Number(n || 0) / 100).toFixed(2)}`;
+const api = async (path, body) => {
+  const response = await fetch(path, { method: body ? 'POST' : 'GET', headers: body ? { 'content-type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+  const json = await response.json();
+  if (!response.ok) throw Error(json.error);
+  return json;
+};
+
+function Field({ label, ...props }) { return <label>{label}<input required {...props} /></label>; }
+
+function SaleForm({ reload }) {
+  const [message, setMessage] = useState('');
+  async function submit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    try {
+      await api('/api/transactions', { type: 'sale', reference: values.get('reference'), customer: values.get('customer'), project: values.get('project'), description: values.get('description'), amount: values.get('amount'), proposedSplit: { richard: values.get('richard'), anastasia: values.get('anastasia'), jean_claude: values.get('jean') } });
+      setMessage('Sale saved.'); form.reset(); reload();
+    } catch (error) { setMessage(error.message); }
+  }
+  return <form onSubmit={submit}><h3>Sales entry</h3><Field label="Reference" name="reference" placeholder="S01" /><Field label="Customer" name="customer" /><label>Project<select name="project"><option>A</option><option>B</option></select></label><Field label="Description" name="description" /><Field label="Amount EUR" name="amount" type="number" min="0.01" step="0.01" /><div className="split"><Field label="Richard %" name="richard" type="number" min="0" max="100" /><Field label="Anastasia %" name="anastasia" type="number" min="0" max="100" /><Field label="Jean-Claude %" name="jean" type="number" min="0" max="100" /></div><button>Submit sale</button><output>{message}</output></form>;
+}
+
+function ExpenseForm({ reload }) {
+  const [message, setMessage] = useState('');
+  async function submit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    try {
+      await api('/api/transactions', { type: 'expense', reference: values.get('reference'), description: values.get('description'), category: values.get('category'), amount: values.get('amount'), proposedAllocation: values.get('allocation') });
+      setMessage('Expense saved.'); form.reset(); reload();
+    } catch (error) { setMessage(error.message); }
+  }
+  return <form onSubmit={submit}><h3>Expense entry</h3><Field label="Reference" name="reference" placeholder="E01" /><Field label="Description" name="description" /><label>Category<select name="category"><option>Materials</option><option>Travel</option><option>Other</option></select></label><Field label="Amount EUR" name="amount" type="number" min="0.01" step="0.01" /><label>Proposed allocation<select name="allocation"><option value="A">A</option><option value="B">B</option><option value="company_overhead">Company overhead</option></select></label><button>Submit expense</button><output>{message}</output></form>;
+}
+
+function Card({ title, value }) { return <div className="card"><span>{title}</span><strong>{value}</strong></div>; }
+function Details({ transaction }) { return transaction.type === 'sale' ? `${transaction.customer}; ${transaction.project}; ${fmt(transaction.amount_cents)}` : `${transaction.description}; proposed ${transaction.proposed_allocation}; ${fmt(transaction.amount_cents)}`; }
+
+export default function App() {
+  const [data, setData] = useState(null);
+  const [message, setMessage] = useState('');
+  const reload = () => api('/api/data').then(setData).catch(error => setMessage(error.message));
+  useEffect(reload, []);
+  if (!data) return <main>Loading finance system… {message}</main>;
+
+  const { employees, currentEmployee, transactions, dashboard } = data;
+  const isManager = currentEmployee?.role === 'manager';
+
+  async function role(employeeId) {
+    try { await api('/api/demo-role', { employeeId }); await reload(); setMessage('Demonstration role selected.'); } catch (error) { setMessage(error.message); }
+  }
+  async function decide(transaction) {
+    const isSale = transaction.type === 'sale';
+    const answer = prompt(isSale ? 'Final split as Richard,Anastasia,Jean-Claude percentages:' : 'Final allocation: A, B, or company_overhead', isSale ? `${transaction.proposed_split.richard},${transaction.proposed_split.anastasia},${transaction.proposed_split.jean_claude}` : transaction.proposed_allocation);
+    if (answer === null) return;
+    try {
+      const decision = isSale ? { split: Object.fromEntries(['richard', 'anastasia', 'jean_claude'].map((key, index) => [key, answer.split(',')[index]?.trim()])) } : { allocation: answer };
+      await api('/api/decisions', { reference: transaction.reference, decision }); reload();
+    } catch (error) { setMessage(error.message); }
+  }
+  async function retry(transaction, target) { try { await api('/api/retry', { reference: transaction.reference, target }); reload(); } catch (error) { setMessage(error.message); } }
+  async function link(event) {
+    event.preventDefault(); const values = new FormData(event.currentTarget);
+    try { await api('/api/telegram-link', { employeeId: values.get('employeeId'), telegramUserId: values.get('telegramUserId') }); setMessage('Telegram ID linked.'); event.currentTarget.reset(); reload(); } catch (error) { setMessage(error.message); }
+  }
+
+  return <main>
+    <header><p className="eyebrow">Friends Included Ltd</p><h1>Wedding Guests for Hire</h1><p>Finance system implemented by <b>Herberts Ēķis</b>. All friendships expire at checkout.</p></header>
+    <section className="role"><h2>Demonstration role</h2><p>{currentEmployee ? `Signed in as ${currentEmployee.name}.` : 'Choose an employee to start the demonstration.'}</p>{employees.map(employee => <button key={employee.id} onClick={() => role(employee.id)}>{employee.name}</button>)}<output>{message}</output></section>
+    {!currentEmployee ? <section><p>Select a role above. Employee views show only their own submitted records; Svetlana sees the full manager ledger.</p></section> : <>
+      {!isManager && <section><h2>Your submissions</h2><p>You can view only your own records and their current statuses.</p></section>}
+      <section className="forms">{currentEmployee.role === 'sales' && <SaleForm reload={reload} />}{currentEmployee.role === 'expenses' && <ExpenseForm reload={reload} />}</section>
+      {isManager && <section><h2>Financial dashboard</h2><div className="cards">{['A', 'B'].map(project => <Card key={project} title={`Project ${project} result`} value={fmt(dashboard[project].result)} />)}<Card title="Company result" value={fmt(dashboard.company.result)} /><Card title="Company overhead" value={fmt(dashboard.company.overhead)} /><Card title="Awaiting allocation" value={fmt(dashboard.company.awaiting)} /></div><table><thead><tr><th>Measure</th><th>A</th><th>B</th><th>Company</th></tr></thead><tbody>{[['Approved income', 'income'], ['Commission expense', 'commissions'], ['Allocated expenses', 'expenses'], ['Result', 'result']].map(([label, key]) => <tr key={key}><td>{label}</td><td>{fmt(dashboard.A[key])}</td><td>{fmt(dashboard.B[key])}</td><td>{fmt(dashboard.company[key])}</td></tr>)}</tbody></table><p>Commission earned: Richard {fmt(dashboard.earned.richard)}, Anastasia {fmt(dashboard.earned.anastasia)}, Jean-Claude {fmt(dashboard.earned.jean_claude)}.</p></section>}
+      <section><h2>{isManager ? 'Records and manager controls' : 'Your record status'}</h2><table><thead><tr><th>Reference</th>{isManager && <th>Submitter</th>}<th>Details</th><th>Status</th>{isManager && <><th>Sheets</th><th>Notification</th><th>Actions</th></>}</tr></thead><tbody>{transactions.map(transaction => <tr key={transaction.id}><td>{transaction.reference}</td>{isManager && <td>{transaction.submitted.name}</td>}<td><Details transaction={transaction} /></td><td>{transaction.status}</td>{isManager && <><td>{transaction.sheet_sync_status}{transaction.sheet_sync_status !== 'synced' && <button onClick={() => retry(transaction, 'sheet')}>Retry Sheets sync</button>}</td><td>{transaction.notification_status}{['failed', 'no_recipient'].includes(transaction.notification_status) && <button onClick={() => retry(transaction, 'notification')}>Retry notification</button>}</td><td>{(transaction.status === 'pending_approval' || transaction.status === 'awaiting_allocation') && <button onClick={() => decide(transaction)}>Approve / correct</button>}</td></>}</tr>)}</tbody></table></section>
+      {isManager && <section><h2>Manager setup</h2><form onSubmit={link}><label>Employee<select name="employeeId">{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label><Field label="Telegram numeric user ID" name="telegramUserId" /><button>Link Telegram ID</button></form></section>}
+    </>}
+    <footer><h2>Instructions and reviewer links</h2><p>Salespeople submit sales; Kevin submits expenses; Svetlana approves or corrects pending records. Website and Telegram use the same processing code. Start the bot before notifications.</p><a href={process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL || '#'}>Telegram bot</a>{isManager && <> · <a href={process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL || '#'}>Google Sheets</a></>} · <a href={process.env.NEXT_PUBLIC_GITHUB_URL || '#'}>GitHub repository</a></footer>
+  </main>;
+}
