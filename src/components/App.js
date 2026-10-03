@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { canSubmitExpense, canSubmitSale, isManager as hasManagerRole } from '../lib/roles';
 
 const fmt = n => `€${(Number(n || 0) / 100).toFixed(2)}`;
 const api = async (path, body) => {
@@ -50,7 +51,7 @@ export default function App() {
   if (!data) return <main>Loading finance system… {message}</main>;
 
   const { employees, currentEmployee, transactions, dashboard } = data;
-  const isManager = currentEmployee?.role === 'manager';
+  const isManager = hasManagerRole(currentEmployee?.role);
 
   async function role(employeeId) {
     try { await api('/api/demo-role', { employeeId }); await reload(); setMessage('Demonstration role selected.'); } catch (error) { setMessage(error.message); }
@@ -75,7 +76,7 @@ export default function App() {
     <section className="role"><h2>Demonstration role</h2><p>{currentEmployee ? `Signed in as ${currentEmployee.name}.` : 'Choose an employee to start the demonstration.'}</p>{employees.map(employee => <button key={employee.id} onClick={() => role(employee.id)}>{employee.name}</button>)}<output>{message}</output></section>
     {!currentEmployee ? <section><p>Select a role above. Employee views show only their own submitted records; Svetlana sees the full manager ledger.</p></section> : <>
       {!isManager && <section><h2>Your submissions</h2><p>You can view only your own records and their current statuses.</p></section>}
-      <section className="forms">{currentEmployee.role === 'sales' && <SaleForm reload={reload} />}{currentEmployee.role === 'expenses' && <ExpenseForm reload={reload} />}</section>
+      <section className="forms">{canSubmitSale(currentEmployee.role) && <SaleForm reload={reload} />}{canSubmitExpense(currentEmployee.role) && <ExpenseForm reload={reload} />}</section>
       {isManager && <section><h2>Financial dashboard</h2><div className="cards">{['A', 'B'].map(project => <Card key={project} title={`Project ${project} result`} value={fmt(dashboard[project].result)} />)}<Card title="Company result" value={fmt(dashboard.company.result)} /><Card title="Company overhead" value={fmt(dashboard.company.overhead)} /><Card title="Awaiting allocation" value={fmt(dashboard.company.awaiting)} /></div><table><thead><tr><th>Measure</th><th>A</th><th>B</th><th>Company</th></tr></thead><tbody>{[['Approved income', 'income'], ['Commission expense', 'commissions'], ['Allocated expenses', 'expenses'], ['Result', 'result']].map(([label, key]) => <tr key={key}><td>{label}</td><td>{fmt(dashboard.A[key])}</td><td>{fmt(dashboard.B[key])}</td><td>{fmt(dashboard.company[key])}</td></tr>)}</tbody></table><p>Commission earned: Richard {fmt(dashboard.earned.richard)}, Anastasia {fmt(dashboard.earned.anastasia)}, Jean-Claude {fmt(dashboard.earned.jean_claude)}.</p></section>}
       <section><h2>{isManager ? 'Records and manager controls' : 'Your record status'}</h2><table><thead><tr><th>Reference</th>{isManager && <th>Submitter</th>}<th>Details</th><th>Status</th>{isManager && <><th>Sheets</th><th>Notification</th><th>Actions</th></>}</tr></thead><tbody>{transactions.map(transaction => <tr key={transaction.id}><td>{transaction.reference}</td>{isManager && <td>{transaction.submitted.name}</td>}<td><Details transaction={transaction} /></td><td>{transaction.status}</td>{isManager && <><td>{transaction.sheet_sync_status}{transaction.sheet_sync_status !== 'synced' && <button onClick={() => retry(transaction, 'sheet')}>Retry Sheets sync</button>}</td><td>{transaction.notification_status}{['failed', 'no_recipient'].includes(transaction.notification_status) && <button onClick={() => retry(transaction, 'notification')}>Retry notification</button>}</td><td>{(transaction.status === 'pending_approval' || transaction.status === 'awaiting_allocation') && <button onClick={() => decide(transaction)}>Approve / correct</button>}</td></>}</tr>)}</tbody></table></section>
       {isManager && <section><h2>Manager setup</h2><form onSubmit={link}><label>Employee<select name="employeeId">{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label><Field label="Telegram numeric user ID" name="telegramUserId" /><button>Link Telegram ID</button></form></section>}
