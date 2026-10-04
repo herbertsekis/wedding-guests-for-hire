@@ -43,9 +43,35 @@ function ExpenseForm({ reload }) {
 function Card({ title, value }) { return <div className="card"><span>{title}</span><strong>{value}</strong></div>; }
 function Details({ transaction }) { return transaction.type === 'sale' ? `${transaction.customer}; ${transaction.project}; ${fmt(transaction.amount_cents)}` : `${transaction.description}; proposed ${transaction.proposed_allocation}; ${fmt(transaction.amount_cents)}`; }
 
+function ManagerDecisionForm({ transaction, close, reload, setMessage }) {
+  const isSale = transaction.type === 'sale';
+  async function submit(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const decision = isSale
+      ? { split: { richard: values.get('richard'), anastasia: values.get('anastasia'), jean_claude: values.get('jean_claude') } }
+      : { allocation: values.get('allocation') };
+    try {
+      await api('/api/decisions', { reference: transaction.reference, decision });
+      setMessage(`Decision saved for ${transaction.reference}.`);
+      close();
+      reload();
+    } catch (error) { setMessage(error.message); }
+  }
+  return <section className="decision-panel" aria-labelledby="manager-decision-heading">
+    <h2 id="manager-decision-heading">Manager decision for {transaction.reference}</h2>
+    <p>Enter the final values below, then select Save decision.</p>
+    <form onSubmit={submit}>
+      {isSale ? <div className="split"><Field label="Final Richard %" name="richard" type="number" min="0" max="100" defaultValue={transaction.proposed_split.richard} /><Field label="Final Anastasia %" name="anastasia" type="number" min="0" max="100" defaultValue={transaction.proposed_split.anastasia} /><Field label="Final Jean-Claude %" name="jean_claude" type="number" min="0" max="100" defaultValue={transaction.proposed_split.jean_claude} /></div> : <label>Final allocation<select name="allocation" defaultValue={transaction.proposed_allocation}><option value="A">A</option><option value="B">B</option><option value="company_overhead">Company overhead</option></select></label>}
+      <button>Save decision</button><button type="button" onClick={close}>Cancel</button>
+    </form>
+  </section>;
+}
+
 export default function App() {
   const [data, setData] = useState(null);
   const [message, setMessage] = useState('');
+  const [decisionTransaction, setDecisionTransaction] = useState(null);
   const reload = () => api('/api/data').then(setData).catch(error => setMessage(error.message));
   useEffect(reload, []);
   if (!data) return <main>Loading finance system… {message}</main>;
@@ -55,15 +81,6 @@ export default function App() {
 
   async function role(employeeId) {
     try { await api('/api/demo-role', { employeeId }); await reload(); setMessage('Demonstration role selected.'); } catch (error) { setMessage(error.message); }
-  }
-  async function decide(transaction) {
-    const isSale = transaction.type === 'sale';
-    const answer = prompt(isSale ? 'Final split as Richard,Anastasia,Jean-Claude percentages:' : 'Final allocation: A, B, or company_overhead', isSale ? `${transaction.proposed_split.richard},${transaction.proposed_split.anastasia},${transaction.proposed_split.jean_claude}` : transaction.proposed_allocation);
-    if (answer === null) return;
-    try {
-      const decision = isSale ? { split: Object.fromEntries(['richard', 'anastasia', 'jean_claude'].map((key, index) => [key, answer.split(',')[index]?.trim()])) } : { allocation: answer };
-      await api('/api/decisions', { reference: transaction.reference, decision }); reload();
-    } catch (error) { setMessage(error.message); }
   }
   async function retry(transaction, target) { try { await api('/api/retry', { reference: transaction.reference, target }); reload(); } catch (error) { setMessage(error.message); } }
   async function link(event) {
@@ -78,7 +95,8 @@ export default function App() {
       {!isManager && <section><h2>Your submissions</h2><p>You can view only your own records and their current statuses.</p></section>}
       <section className="forms">{canSubmitSale(currentEmployee.role) && <SaleForm reload={reload} />}{canSubmitExpense(currentEmployee.role) && <ExpenseForm reload={reload} />}</section>
       {isManager && <section><h2>Financial dashboard</h2><div className="cards">{['A', 'B'].map(project => <Card key={project} title={`Project ${project} result`} value={fmt(dashboard[project].result)} />)}<Card title="Company result" value={fmt(dashboard.company.result)} /><Card title="Company overhead" value={fmt(dashboard.company.overhead)} /><Card title="Awaiting allocation" value={fmt(dashboard.company.awaiting)} /></div><table><thead><tr><th>Measure</th><th>A</th><th>B</th><th>Company</th></tr></thead><tbody>{[['Approved income', 'income'], ['Commission expense', 'commissions'], ['Allocated expenses', 'expenses'], ['Result', 'result']].map(([label, key]) => <tr key={key}><td>{label}</td><td>{fmt(dashboard.A[key])}</td><td>{fmt(dashboard.B[key])}</td><td>{fmt(dashboard.company[key])}</td></tr>)}</tbody></table><p>Commission earned: Richard {fmt(dashboard.earned.richard)}, Anastasia {fmt(dashboard.earned.anastasia)}, Jean-Claude {fmt(dashboard.earned.jean_claude)}.</p></section>}
-      <section><h2>{isManager ? 'Records and manager controls' : 'Your record status'}</h2><table><thead><tr><th>Reference</th>{isManager && <th>Submitter</th>}<th>Details</th><th>Status</th>{isManager && <><th>Sheets</th><th>Notification</th><th>Actions</th></>}</tr></thead><tbody>{transactions.map(transaction => <tr key={transaction.id}><td>{transaction.reference}</td>{isManager && <td>{transaction.submitted.name}</td>}<td><Details transaction={transaction} /></td><td>{transaction.status}</td>{isManager && <><td>{transaction.sheet_sync_status}{transaction.sheet_sync_status !== 'synced' && <button onClick={() => retry(transaction, 'sheet')}>Retry Sheets sync</button>}</td><td>{transaction.notification_status}{['failed', 'no_recipient'].includes(transaction.notification_status) && <button onClick={() => retry(transaction, 'notification')}>Retry notification</button>}</td><td>{(transaction.status === 'pending_approval' || transaction.status === 'awaiting_allocation') && <button onClick={() => decide(transaction)}>Approve / correct</button>}</td></>}</tr>)}</tbody></table></section>
+      {isManager && decisionTransaction && <ManagerDecisionForm transaction={decisionTransaction} close={() => setDecisionTransaction(null)} reload={reload} setMessage={setMessage} />}
+      <section><h2>{isManager ? 'Records and manager controls' : 'Your record status'}</h2><table><thead><tr><th>Reference</th>{isManager && <th>Submitter</th>}<th>Details</th><th>Status</th>{isManager && <><th>Sheets</th><th>Notification</th><th>Actions</th></>}</tr></thead><tbody>{transactions.map(transaction => <tr key={transaction.id}><td>{transaction.reference}</td>{isManager && <td>{transaction.submitted.name}</td>}<td><Details transaction={transaction} /></td><td>{transaction.status}</td>{isManager && <><td>{transaction.sheet_sync_status}{transaction.sheet_sync_status !== 'synced' && <button onClick={() => retry(transaction, 'sheet')}>Retry Sheets sync</button>}</td><td>{transaction.notification_status}{['failed', 'no_recipient'].includes(transaction.notification_status) && <button onClick={() => retry(transaction, 'notification')}>Retry notification</button>}</td><td>{(transaction.status === 'pending_approval' || transaction.status === 'awaiting_allocation') && <button onClick={() => setDecisionTransaction(transaction)}>Approve / correct</button>}</td></>}</tr>)}</tbody></table></section>
       {isManager && <section><h2>Manager setup</h2><form onSubmit={link}><label>Employee<select name="employeeId">{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label><Field label="Telegram numeric user ID" name="telegramUserId" /><button>Link Telegram ID</button></form></section>}
     </>}
     <footer><h2>Instructions and reviewer links</h2><p>Salespeople submit sales; Kevin submits expenses; Svetlana approves or corrects pending records. Website and Telegram use the same processing code. Start the bot before notifications.</p><a href={process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL || '#'}>Telegram bot</a>{isManager && <> · <a href={process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL || '#'}>Google Sheets</a></>} · <a href={process.env.NEXT_PUBLIC_GITHUB_URL || '#'}>GitHub repository</a></footer>
